@@ -1,0 +1,424 @@
+using UnityEngine;
+using AtmosphericHeightFog;
+
+namespace Enviro
+{
+   // [ExecuteInEditMode]
+   // [AddComponentMenu("Enviro 3/Integrations/MicroSplat + TVE Integration")]
+    public class EnviroMicrosplatTVEIntegration : MonoBehaviour
+    {
+        [Header("Wetness")]
+        [Tooltip("Enable to change wetness-related parameters. Microsplat and TVE")]
+        public bool UpdateWetness = true;
+        [Range(0f, 1f)]
+        public float minWetness = 0f;
+        [SerializeField, Range(0f, 1f)]
+        [Tooltip("Adjust for less wetness. TVE")]
+        // I think .1 looks best
+        private float maxWetnessTVE = 1f;
+        [SerializeField, Range(0f, 1f)]
+        [Tooltip("Adjust for less wetness. Microsplat")]
+        private float maxWetnessMicrosplat = 1f;
+        [Header("Snow Settings")]
+        [Tooltip("Enable to change snow-related parameters. Microsplat and TVE")]
+        public bool UpdateSnow = true;
+        [Header("Wind Settings")]
+        [Tooltip("Enable to change wind-related parameters. Microsplat and TVE")]
+        public bool UpdateWindZone = true;
+
+        [Header("Season Settings")]
+        [Tooltip("Enable to change season-related parameters in. TVE")]
+        public bool updateSeasons = true;
+
+        [Header("Rain Ripples")]
+        [Tooltip("Enable to change Rain setting. Microsplat.")]
+        public bool UpdateRainRipples = true;
+        [Header("Puddle Settings")]
+        [Tooltip("Enable to change Puddles setting. Microsplat.")]
+        public bool UpdatePuddles = true;
+        [Header("Stream Settings")]
+        [Tooltip("Enable to change Stream setting. Microsplat.")]
+        public bool UpdateStreams = true;
+        [Header("Snow Height Settings")]
+        [Tooltip("Begin and end height of snow in scene in meters")]
+        public Vector2 SnowMinMaxHeight;
+        [Header("Duration Settings")]
+        [Tooltip("Controls the duration (in seconds) for gradual changes of weather.")]
+        public float changeDuration = 15f;
+
+        [Header("Height Fog Global")]
+        public bool AtmosphericFogBoxophobic = true;
+        public HeightFogGlobal fog;        
+       
+        [Tooltip("What time should the Time Of Day be 0")]
+        public float fogStartHour = 12f; // The hour when fog should be 0
+        [Tooltip("What time should the Time Of Day be 1")]
+        public float fogEndHour = 0f; // The hour when fog should be 1
+
+        // Custom code for TVE
+        [Header("Enable TVE Support")]
+        public bool TVE = true;
+        // Will also work the BetterLit shaders
+        [Header("Enable MicroSplat Support")]
+        public bool MicroSplat = true;
+
+        [Header("View Only")]
+        [Range(0F, 1F)]
+        public float curentWind;
+        [Range(0F, 1F)]
+        public float curentWet;
+        [Range(0f, 4F)]
+        public float curentSeason;
+        [Range(0f, 1F)]
+        public float curentSnow;
+        private TheVegetationEngine.TVEGlobalMotion GetTVEGlobalMotion;
+        private TheVegetationEngine.TVEGlobalControl GetTVEGlobalControl;
+
+        private int year;
+        private int day;
+        private int month;
+        private int dayInYear;
+        private int daysInYear;
+        // Define the number of days in each month for a non-leap year
+        private readonly int[] DaysInMonth = { 0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+
+        // To update wind correct for MicroSplat, If update too much things look strange
+        private float lastUpdateTime = 0f;
+        private float updateInterval = 8f;
+
+        void Start()
+        {
+            Shader.SetGlobalVector("_Global_SnowMinMaxHeight", SnowMinMaxHeight);
+
+            if (TVE)
+            {
+                GetTVEGlobalMotion = GameObject.Find("Global Motion").GetComponent<TheVegetationEngine.TVEGlobalMotion>();
+                GetTVEGlobalControl = GameObject.Find("Global Control").GetComponent<TheVegetationEngine.TVEGlobalControl>();
+             
+                if (updateSeasons)
+                {
+                    day = EnviroManager.instance.Time.Settings.daySerial;
+                    month = EnviroManager.instance.Time.Settings.monthSerial;
+                    year = EnviroManager.instance.Time.Settings.yearSerial;
+                    dayInYear = GetDayOfYear(year, month, day);
+                    daysInYear = GetDaysInYear(year);
+                    float season = (float)dayInYear / (float)daysInYear;
+
+                    GetTVEGlobalControl.seasonControl = Mathf.Lerp(0f, 4f, season);
+                    curentSeason = Mathf.Lerp(0f, 4f, season);
+                }               
+            }
+
+            if (UpdateWindZone)
+            {
+                if (TVE)
+                {
+                    GetTVEGlobalMotion.windPower = EnviroManager.instance.Environment.Settings.windSpeed;
+                    curentWind = EnviroManager.instance.Environment.Settings.windSpeed;
+
+                    // I am trying to redo but not sure if what I have done is correct.
+                    // GetTVEGlobalMotion.transform.eulerAngles = EnviroSkyMgr.instance.Components.windZone.gameObject.transform.eulerAngles;
+                    float windDirectionX = EnviroManager.instance.Environment.Settings.windDirectionX;
+                    float windDirectionY = EnviroManager.instance.Environment.Settings.windDirectionY;
+                    GetTVEGlobalMotion.transform.eulerAngles = new Vector3(windDirectionX, windDirectionY, 0);
+                }
+
+                if (MicroSplat)
+                {
+                    float currentWeather = EnviroManager.instance.Environment.Settings.windSpeed;
+
+                    Shader.SetGlobalFloat("_Global_WindParticulateStrength", currentWeather);
+                    Shader.SetGlobalFloat("_Global_SnowParticulateStrength", currentWeather);
+
+                    float windDirectionX = EnviroManager.instance.Environment.Settings.windDirectionX;
+                    float windDirectionY = EnviroManager.instance.Environment.Settings.windDirectionY;
+                    Shader.SetGlobalFloat("_Global_WindParticulateRotation", Mathf.Atan2(windDirectionY, windDirectionX) * Mathf.Rad2Deg);
+                }
+            }
+
+            if (UpdateSnow)
+            {
+                if (MicroSplat)
+                {
+
+                    Shader.SetGlobalFloat("_Global_SnowLevel", EnviroManager.instance.Environment.Settings.snow);
+                    curentSnow = EnviroManager.instance.Environment.Settings.snow;
+                }
+
+                if (TVE)
+                {
+                    GetTVEGlobalControl.globalOverlay = EnviroManager.instance.Environment.Settings.snow;
+                    curentSnow = EnviroManager.instance.Environment.Settings.snow;
+                }
+            }
+
+            if (UpdateWetness)
+            {               
+                if (MicroSplat)
+                {
+                    float currWetness = Mathf.Clamp(EnviroManager.instance.Environment.Settings.wetness, minWetness, maxWetnessMicrosplat);
+                    Shader.SetGlobalVector("_Global_WetnessParams", new Vector2(currWetness, maxWetnessMicrosplat));
+
+                    curentWet = currWetness;
+                }
+
+                if (TVE)
+                {
+                    float currWetness = Mathf.Clamp(EnviroManager.instance.Environment.Settings.wetness, minWetness, maxWetnessTVE);
+                    GetTVEGlobalControl.globalWetness = currWetness;
+                    curentWet = currWetness;
+                    //Remove snow when getting wet in TVE
+                    // GetTVEGlobalControl.globalOverlay -= currWetness;
+                }
+            }
+
+            if (MicroSplat)
+            {
+                if (UpdatePuddles)
+                {
+                    Shader.SetGlobalFloat("_Global_PuddleParams", EnviroManager.instance.Environment.Settings.wetness);
+                }
+
+                if (UpdateStreams)
+                {
+                    Shader.SetGlobalFloat("_Global_StreamMax", EnviroManager.instance.Environment.Settings.wetness);
+                }
+
+                if (UpdateRainRipples)
+                {
+                    if (EnviroManager.instance.Effects != null)
+                    {
+                        float rainIntensity = Mathf.Clamp(EnviroManager.instance.Environment.Settings.wetness, 0f, 1f);
+
+                        Shader.SetGlobalFloat("_Global_RainIntensity", rainIntensity);
+                    }
+                }
+            }
+        }
+
+        void Update()
+        {
+            if (EnviroManager.instance == null || EnviroManager.instance.Environment == null)
+                return;
+
+            if (UpdateWindZone)
+            {              
+                if (MicroSplat)
+                {
+                    float currentTime = Time.time;
+                    // Check if the specified interval has passed since the last update
+                    if (currentTime - lastUpdateTime >= updateInterval)
+                    {
+                        //Debug.Log(Shader.GetGlobalFloat("_Global_WindParticulateStrength"));
+
+                        // Changing over time creates weired behaviour
+                        float currentWeather = EnviroManager.instance.Environment.Settings.windSpeed;
+
+
+                        Shader.SetGlobalFloat("_Global_WindParticulateStrength", currentWeather);
+                        Shader.SetGlobalFloat("_Global_SnowParticulateStrength", currentWeather);
+
+                        float windDirectionX = EnviroManager.instance.Environment.Settings.windDirectionX;
+                        float windDirectionY = EnviroManager.instance.Environment.Settings.windDirectionY;
+                        Shader.SetGlobalFloat("_Global_WindParticulateRotation", Mathf.Atan2(windDirectionY, windDirectionX) * Mathf.Rad2Deg);
+
+                        // Update the last update time
+                        lastUpdateTime = currentTime;
+                    }
+                }
+
+                if(TVE)
+                {
+                    // To change wind over time
+                    float currentWeather = Mathf.Lerp(GetTVEGlobalMotion.windPower,
+                                                              EnviroManager.instance.Environment.Settings.windSpeed,
+                                                              Time.deltaTime / changeDuration);
+
+                    GetTVEGlobalMotion.windPower = currentWeather;
+                    curentWind = currentWeather;
+
+                    // I am trying to redo but not sure if what I have done is correct.
+                    // GetTVEGlobalMotion.transform.eulerAngles = EnviroSkyMgr.instance.Components.windZone.gameObject.transform.eulerAngles;
+                    float windDirectionX = EnviroManager.instance.Environment.Settings.windDirectionX;
+                    float windDirectionY = EnviroManager.instance.Environment.Settings.windDirectionY;
+                    GetTVEGlobalMotion.transform.eulerAngles = new Vector3(windDirectionX, windDirectionY, 0);
+                }
+            }
+
+            if (UpdateSnow)
+            {
+                if (MicroSplat)
+                {
+                    // To change snow over time
+                    float changeWeather = Mathf.Lerp(Shader.GetGlobalFloat("_Global_SnowLevel"),
+                                                     EnviroManager.instance.Environment.Settings.snow,
+                                                     Time.deltaTime / changeDuration);
+
+                    Shader.SetGlobalFloat("_Global_SnowLevel", changeWeather);
+                    curentSnow = changeWeather;
+                }
+
+                if (TVE)
+                {
+                    // To change snow over time
+                    float changeWeather = Mathf.Lerp(GetTVEGlobalControl.globalOverlay,
+                                                     EnviroManager.instance.Environment.Settings.snow,
+                                                     Time.deltaTime / changeDuration);
+
+                    GetTVEGlobalControl.globalOverlay = changeWeather;
+                    curentSnow = changeWeather;
+                }
+            }
+
+            if (UpdateWetness)
+            {
+               
+
+                if (MicroSplat)
+                {
+                    float currWetness = Mathf.Clamp(EnviroManager.instance.Environment.Settings.wetness, minWetness, maxWetnessMicrosplat);
+                    // To change wetness over time
+                    Vector2 changeWeather = Vector2.Lerp(Shader.GetGlobalVector("_Global_WetnessParams"),
+                                                        new Vector2(currWetness, maxWetnessMicrosplat),
+                                                        Time.deltaTime / changeDuration);
+
+                    Shader.SetGlobalVector("_Global_WetnessParams", changeWeather);
+
+                    curentWet = changeWeather.x;
+                }
+
+                if (TVE)
+                {
+                    float currWetness = Mathf.Clamp(EnviroManager.instance.Environment.Settings.wetness, minWetness, maxWetnessTVE);
+                    // To change wetness over time
+                    float changeWeather = Mathf.Lerp(GetTVEGlobalControl.globalWetness,
+                                                     currWetness,
+                                                     Time.deltaTime / changeDuration);
+
+                    GetTVEGlobalControl.globalWetness = changeWeather;
+                    curentWet = changeWeather;
+                    //Remove snow when getting wet in TVE
+                    // This can caue snow to go negitive so I have removed
+                    //GetTVEGlobalControl.globalOverlay -= changeWeather;
+                }
+            }
+
+            if (MicroSplat)
+            {
+                if (UpdatePuddles)
+                {
+                    float changeWeather = Mathf.Lerp(Shader.GetGlobalFloat("_Global_PuddleParams"),
+                                                     EnviroManager.instance.Environment.Settings.wetness,
+                                                     Time.deltaTime / changeDuration);
+
+                    Shader.SetGlobalFloat("_Global_PuddleParams", changeWeather);
+                }
+
+                if (UpdateStreams)
+                {
+                    float changeWeather = Mathf.Lerp(Shader.GetGlobalFloat("_Global_StreamMax"),
+                                                     EnviroManager.instance.Environment.Settings.wetness,
+                                                     Time.deltaTime / changeDuration);
+
+                    Shader.SetGlobalFloat("_Global_StreamMax", changeWeather);
+                }
+
+                if (UpdateRainRipples)
+                {
+                    if (EnviroManager.instance.Effects != null)             
+                    {
+                        if (EnviroManager.instance.Environment.Settings.wetness > 0)
+                        {
+                            Shader.SetGlobalFloat("_Global_RainIntensity", 1);
+                        }
+                        else
+                        {
+                            Shader.SetGlobalFloat("_Global_RainIntensity", 0);
+                        }
+                        //    float rainIntensity = Mathf.Clamp(EnviroManager.instance.Environment.Settings.wetness, 0f, 1f);
+
+                        ////float changeWeather = Mathf.Lerp(Shader.GetGlobalFloat("_Global_RainIntensity"),
+                        ////                             rainIntensity,
+                        ////                             Time.deltaTime / changeDuration);
+
+                        //Shader.SetGlobalFloat("_Global_RainIntensity", rainIntensity);
+                    }
+                }
+            }
+
+            //Update TVE Wind
+            if (TVE)
+            {              
+                if (updateSeasons)
+                {
+                    day = EnviroManager.instance.Time.Settings.daySerial;
+                    month = EnviroManager.instance.Time.Settings.monthSerial;
+                    year = EnviroManager.instance.Time.Settings.yearSerial;
+                    dayInYear = GetDayOfYear(year, month, day);
+                    daysInYear = GetDaysInYear(year);
+                    float season = (float)dayInYear / (float)daysInYear;
+
+                    GetTVEGlobalControl.seasonControl = Mathf.Lerp(0f, 4f, season);
+                    curentSeason = Mathf.Lerp(0f, 4f, season);
+                }
+            }
+
+            if (AtmosphericFogBoxophobic)
+            {
+                float fogTimeOfDay;
+                int currentHour = EnviroManager.instance.Time.hours;
+                float currentMin = EnviroManager.instance.Time.minutes / 60;
+                float currentTime = currentHour + currentMin;
+
+                // Assuming fogStartHour is always 12 and fogEndHour is always 0
+                float t;
+
+                if (currentHour < fogStartHour)
+                {
+                    // Lerping between 0 and 11, where fogEndHour is 1 and startLight is 0
+                    t = Mathf.InverseLerp(10, fogEndHour, currentTime);
+                }
+                else
+                {
+                    // Lerping between 12 and 23, where fogStartHour is 0 and startDark is 1
+                    t = Mathf.InverseLerp(fogStartHour, 23, currentTime);
+                }
+
+                fogTimeOfDay = Mathf.Lerp(0f, 1f, t);
+                fog.timeOfDay = fogTimeOfDay;              
+            }
+        }
+
+        public int GetDaysInYear(int year)
+        {
+            return IsLeapYear(year) ? 366 : 365;
+        }
+
+        public int GetDayOfYear(int year, int month, int day)
+        {
+            int dayOfYear = 0;
+
+            // Sum the days of the previous months
+            for (int i = 1; i < month; i++)
+            {
+                dayOfYear += DaysInMonth[i];
+            }
+
+            // Add the days of the current month
+            dayOfYear += day;
+
+            // If it's a leap year and the current month is March or later, add one day
+            if (IsLeapYear(year) && month > 2)
+            {
+                dayOfYear++;
+            }
+
+            return dayOfYear;
+        }
+
+        public bool IsLeapYear(int year)
+        {
+            return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+        }
+    }  
+}
