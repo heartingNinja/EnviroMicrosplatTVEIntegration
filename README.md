@@ -1,0 +1,1 @@
+Intergation for TVE, Enviro, AtomsphericHeightFog, and Microsplat. Will have errors if you dont have AtomsphericHeightFog. Can use by commiting out lines with errors if dont have AtomsphericHeightFog. Should be three lines. Just add to scene to use. 
